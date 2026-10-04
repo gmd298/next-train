@@ -244,5 +244,5 @@ async function build() {
 
 const widget = await build();
 if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentMedium();
+else await widget.presentSmall();
 Script.complete();
