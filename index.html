@@ -261,7 +261,7 @@ details.help b { color: var(--text); }
           <li>Press and hold the new widget, tap <b>Edit Widget</b>, and for <b>Script</b> choose the one you just pasted.</li>
         </ol>
         <p><button id="copyBtn" class="pill" type="button">Copy widget</button><span id="copied" class="copied"></span></p>
-        <p>Good to know: iPhones only refresh widgets every few minutes, so the train times on it can be a little behind (the countdown itself ticks live). For up-to-the-second times, tap the widget to open this app.</p>
+        <p>Good to know: iPhones only refresh widgets every few minutes, so the train times on it can be a little behind. The small widget shows the clock time to leave by; the medium and large ones show a ticking countdown, which can count up past zero until the iPhone refreshes it. For up-to-the-second times, tap the widget to open this app.</p>
         <p style="margin-bottom:0">If you change your station, directions or walk time, tap <b>Copy widget</b> again and paste it over the old script in Scriptable.</p>
       </div>
     </details>
@@ -464,19 +464,30 @@ async function build() {
   let leave;
 
   if (fam === "small") {
+    // Fixed clock times rather than a ticking timer: iOS refreshes widgets when it likes,
+    // and a timer that passes zero starts counting up. A "leave by" time is never wrong.
     leave = new Date((n.t - walk) * 1000);
-    const go = leave.getTime() - Date.now() < 45000;
-    line(w, CFG.walk ? (go ? "LEAVE NOW" : "LEAVE IN") : "NEXT TRAIN IN", 10, go ? GREEN : AMBER, true);
-    timer(w, leave, 36, false);
-    w.addSpacer(2);
-    const r = w.addStack(); r.centerAlignContent(); r.spacing = 5;
-    bullet(r, n.route, 17);
-    line(r, clock(new Date(n.t * 1000)), 14, WHITE, true);
-    line(w, "to " + n.dest, 11, DIM, false);
+    const soon = leave.getTime() - Date.now() < 60000;
+    const k = w.addStack(); k.centerAlignContent();
+    line(k, CFG.walk ? "LEAVE BY" : "NEXT TRAIN", 10, soon ? GREEN : AMBER, true);
+    k.addSpacer();
+    line(k, "↻ " + clock(new Date(), true), 9, DIM, false);
+    const big = w.addStack(); big.bottomAlignContent(); big.spacing = 3;
+    line(big, clock(CFG.walk ? leave : new Date(n.t * 1000), true), 34, soon ? GREEN : AMBER, true);
+    const ap = big.addStack(); ap.layoutVertically(); ap.addSpacer();
+    line(ap, clock(leave).slice(-2), 11, soon ? GREEN : AMBER, true);
+    ap.addSpacer(5);
+    w.addSpacer(3);
+    const list = w.addStack(); list.layoutVertically(); list.spacing = 4;
+    ok.slice(0, 3).forEach((a, i) => {
+      const r = list.addStack(); r.centerAlignContent(); r.spacing = 5;
+      bullet(r, a.route, 15);
+      line(r, clock(new Date(a.t * 1000), true), 13, i ? WHITE : (soon ? GREEN : AMBER), true);
+      r.addSpacer();
+      if (i && CFG.walk) line(r, "leave " + clock(new Date((a.t - walk) * 1000), true), 10, GREEN, false);
+      else if (!i) line(r, a.dest.replace(/-.*/, ""), 10, DIM, false);
+    });
     w.addSpacer();
-    const f = w.addStack();
-    if (ok[1]) { line(f, "then " + clock(new Date(ok[1].t * 1000), true), 10, DIM, false); f.addSpacer(); }
-    line(f, "↻ " + clock(new Date(), true), 9, DIM, false);
   } else if (fam === "medium") {
     const body = w.addStack(); body.spacing = 12;
     leave = heroBox(body, n, walk, { width: 150, timer: 38, pad: 7 });
