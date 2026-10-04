@@ -89,16 +89,18 @@ function clock(d, short) {
 
 function bullet(parent, route, size) {
   const txt = lineText(route);
+  // A coloured pill sized by padding around the letter (a fixed-size stack hid the letter on iOS).
+  const fs = size * (txt.length > 1 ? .5 : .66);
   const s = parent.addStack();
-  s.size = new Size(txt.length > 1 ? size * 1.6 : size, size);
   s.cornerRadius = size / 2;
   s.backgroundColor = new Color(lineColor(route));
   s.centerAlignContent();
-  s.addSpacer();
+  const v = Math.max(1, (size - fs * 1.2) / 2), h = txt.length > 1 ? size * .3 : Math.max(2, (size - fs * .62) / 2);
+  s.setPadding(v, h, v, h);
   const t = s.addText(txt);
-  t.font = Font.boldSystemFont(size * (txt.length > 1 ? .45 : .62));
+  t.font = Font.boldSystemFont(fs);
   t.textColor = /^[NQRW]/.test(route) ? Color.black() : Color.white();
-  s.addSpacer();
+  t.lineLimit = 1;
   return s;
 }
 
@@ -177,7 +179,7 @@ async function build() {
   const top = w.addStack(); top.centerAlignContent();
   line(top, CFG.station, fam === "small" ? 11 : 13, CYAN, true);
   if (fam !== "small") { top.addSpacer(8); line(top, CFG.dir, 11, DIM, false); }
-  w.addSpacer(fam === "small" ? 5 : 7);
+  w.addSpacer(fam === "small" ? 3 : 7);
 
   let trains;
   try { trains = await getTrains(); }
@@ -191,25 +193,29 @@ async function build() {
   let leave;
 
   if (fam === "small") {
-    // Fixed clock times rather than a ticking timer: iOS refreshes widgets when it likes,
-    // and a timer that passes zero starts counting up. A "leave by" time is never wrong.
+    // A fixed "leave by" clock time, plus iOS's live offset countdown ("-4 minutes"), which flips
+    // to "+2 minutes" if the time passes before iOS refreshes the widget (timers can't stop at zero).
     leave = new Date((n.t - walk) * 1000);
+    const target = CFG.walk ? leave : new Date(n.t * 1000);
     const soon = leave.getTime() - Date.now() < 60000;
+    const col = soon ? GREEN : AMBER;
     const k = w.addStack(); k.centerAlignContent();
-    line(k, CFG.walk ? "LEAVE BY" : "NEXT TRAIN", 10, soon ? GREEN : AMBER, true);
+    line(k, CFG.walk ? "LEAVE BY" : "NEXT TRAIN", 10, col, true);
     k.addSpacer();
     line(k, "↻ " + clock(new Date(), true), 9, DIM, false);
     const big = w.addStack(); big.bottomAlignContent(); big.spacing = 3;
-    line(big, clock(CFG.walk ? leave : new Date(n.t * 1000), true), 34, soon ? GREEN : AMBER, true);
-    const ap = big.addStack(); ap.layoutVertically(); ap.addSpacer();
-    line(ap, clock(leave).slice(-2), 11, soon ? GREEN : AMBER, true);
-    ap.addSpacer(5);
-    w.addSpacer(3);
-    const list = w.addStack(); list.layoutVertically(); list.spacing = 4;
+    line(big, clock(target, true), 30, col, true);
+    const ap = big.addStack(); ap.setPadding(0, 0, 5, 0);
+    line(ap, clock(target).slice(-2), 10, col, true);
+    const off = w.addDate(target);
+    off.applyOffsetStyle();
+    off.font = Font.boldSystemFont(13); off.textColor = col; off.lineLimit = 1; off.minimumScaleFactor = .7;
+    w.addSpacer(4);
+    const list = w.addStack(); list.layoutVertically(); list.spacing = 3;
     ok.slice(0, 3).forEach((a, i) => {
       const r = list.addStack(); r.centerAlignContent(); r.spacing = 5;
-      bullet(r, a.route, 15);
-      line(r, clock(new Date(a.t * 1000), true), 13, i ? WHITE : (soon ? GREEN : AMBER), true);
+      bullet(r, a.route, 14);
+      line(r, clock(new Date(a.t * 1000), true), 12, i ? WHITE : col, true);
       r.addSpacer();
       if (i && CFG.walk) line(r, "leave " + clock(new Date((a.t - walk) * 1000), true), 10, GREEN, false);
       else if (!i) line(r, a.dest.replace(/-.*/, ""), 10, DIM, false);

@@ -637,7 +637,7 @@ $("copyBtn").addEventListener("click", async () => {
 });
 
 // ---------- stay up to date: if the site has a newer version than this saved copy, load it ----------
-const BUILD = "202610040200";
+const BUILD = "202610040210";
 async function checkForUpdate() {
   try {
     const r = await fetch(location.pathname + "?check=" + Date.now(), { cache: "no-store" });
