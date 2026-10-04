@@ -257,7 +257,7 @@ details.help b { color: var(--text); }
           <li>Install <b>Scriptable</b> from the App Store (free).</li>
           <li>Tap <b>Copy widget</b> below.</li>
           <li>Open Scriptable, tap <b>+</b>, paste, then tap <b>Done</b>.</li>
-          <li>On your home screen, press and hold an empty spot, tap <b>Edit</b> → <b>Add Widget</b>, choose <b>Scriptable</b>, and pick the <b>medium</b> size.</li>
+          <li>On your home screen, press and hold an empty spot, tap <b>Edit</b> → <b>Add Widget</b>, choose <b>Scriptable</b>, and pick the <b>medium</b> size (small and large work too).</li>
           <li>Press and hold the new widget, tap <b>Edit Widget</b>, and for <b>Script</b> choose the one you just pasted.</li>
         </ol>
         <p><button id="copyBtn" class="pill" type="button">Copy widget</button><span id="copied" class="copied"></span></p>
@@ -354,10 +354,10 @@ async function getTrains() {
   return keep;
 }
 
-function clock(d) {
+function clock(d, short) {
   let h = d.getHours(), m = d.getMinutes(), ap = h < 12 ? "AM" : "PM";
   h = h % 12 || 12;
-  return h + ":" + (m < 10 ? "0" : "") + m + " " + ap;
+  return h + ":" + (m < 10 ? "0" : "") + m + (short ? "" : " " + ap);
 }
 
 function bullet(parent, route, size) {
@@ -382,69 +382,119 @@ function line(w, text, size, color, bold) {
   return t;
 }
 
+// The big countdown: a live ticking timer to the leave time (or GO NOW when it's time).
+function timer(parent, leave, size, center) {
+  if (leave.getTime() - Date.now() < 45000) {
+    const t = line(parent, CFG.walk ? "GO!" : "NOW", size, GREEN, true);
+    if (center) t.centerAlignText();
+    return;
+  }
+  const d = parent.addDate(leave);
+  d.applyTimerStyle();
+  d.font = Font.boldMonospacedSystemFont(size);
+  d.textColor = AMBER; d.lineLimit = 1; d.minimumScaleFactor = .5;
+  if (center) d.centerAlignText();
+}
+
+// Glowing outlined box like the app's LEAVE IN panel.
+function heroBox(parent, n, walk, opts) {
+  const leave = new Date((n.t - walk) * 1000);
+  const go = leave.getTime() - Date.now() < 45000;
+  const box = parent.addStack();
+  box.layoutVertically();
+  box.borderColor = go ? GREEN : AMBER; box.borderWidth = 1.5; box.cornerRadius = 14;
+  box.backgroundColor = new Color(go ? "#5dff9a" : "#ffc24a", .09);
+  box.setPadding(opts.pad, 10, opts.pad, 10);
+  if (opts.width) box.size = new Size(opts.width, 0);
+  const k = box.addStack(); k.addSpacer();
+  line(k, CFG.walk ? (go ? "LEAVE NOW" : "LEAVE IN") : "NEXT TRAIN IN", 10, go ? GREEN : AMBER, true);
+  k.addSpacer();
+  const tr = box.addStack(); tr.addSpacer(); timer(tr, leave, opts.timer, true); tr.addSpacer();
+  const r = box.addStack(); r.centerAlignContent(); r.spacing = 4; r.addSpacer();
+  bullet(r, n.route, 16);
+  line(r, opts.wide ? "at " + clock(new Date(n.t * 1000)) + " to " + n.dest : clock(new Date(n.t * 1000)), 13, WHITE, true);
+  r.addSpacer();
+  if (!opts.wide) { const dr = box.addStack(); dr.addSpacer(); line(dr, "to " + n.dest, 11, DIM, false); dr.addSpacer(); }
+  return leave;
+}
+
+// One upcoming train: bullet, arrival time, and when to leave for it.
+function trainRow(parent, a, walk, withDest) {
+  const r = parent.addStack(); r.centerAlignContent(); r.spacing = 6;
+  bullet(r, a.route, 16);
+  if (withDest) { line(r, a.dest, 12, WHITE, false); r.addSpacer(); line(r, clock(new Date(a.t * 1000), true), 12, WHITE, true); }
+  else { line(r, clock(new Date(a.t * 1000), true), 13, WHITE, true); r.addSpacer(); }
+  line(r, (CFG.walk ? "leave " : "") + clock(new Date((a.t - walk) * 1000), true), 11, CFG.walk ? GREEN : DIM, false);
+}
+
+function message(w, title, sub) {
+  w.addSpacer();
+  line(w, title, 14, WHITE, true);
+  line(w, sub, 12, DIM, false);
+  w.addSpacer();
+}
+
 async function build() {
   const fam = config.widgetFamily || "medium";
-  const big = fam !== "small";
   const w = new ListWidget();
   w.backgroundColor = new Color("#05080e");
   const g = new LinearGradient();
   g.colors = [new Color("#0d2240"), new Color("#05080e")];
   g.locations = [0, .7];
   w.backgroundGradient = g;
-  w.setPadding(12, 14, 10, 14);
+  w.setPadding(fam === "small" ? 11 : 12, 13, fam === "small" ? 10 : 11, 13);
   w.url = CFG.url;
+  w.refreshAfterDate = new Date(Date.now() + 5 * 60000);
 
+  // header: station + direction
   const top = w.addStack(); top.centerAlignContent();
-  line(top, CFG.station, big ? 14 : 12, CYAN, true);
-  if (big) { top.addSpacer(); line(top, CFG.dir, 12, DIM, false); }
-  w.addSpacer(4);
+  line(top, CFG.station, fam === "small" ? 11 : 13, CYAN, true);
+  if (fam !== "small") { top.addSpacer(8); line(top, CFG.dir, 11, DIM, false); }
+  w.addSpacer(fam === "small" ? 5 : 7);
 
   let trains;
   try { trains = await getTrains(); }
-  catch (e) {
-    w.addSpacer();
-    line(w, "Can't reach the MTA right now.", 14, WHITE, true);
-    line(w, "Tap to open Next Train.", 12, DIM, false);
-    w.addSpacer();
-    w.refreshAfterDate = new Date(Date.now() + 5 * 60000);
-    return w;
-  }
+  catch (e) { message(w, "Can't reach the MTA right now.", "Tap to open Next Train."); return w; }
   const walk = CFG.walk * 60;
   const now = Date.now() / 1000;
   const ok = trains.filter(a => a.t - walk - now > -15);
-  if (!ok.length) {
-    line(w, "LEAVE IN", 11, AMBER, true);
+  const updated = "Updated " + clock(new Date());
+  if (!ok.length) { message(w, "No trains due", "in the next 90 minutes"); line(w, updated, 9, DIM, false); return w; }
+  const n = ok[0];
+  let leave;
+
+  if (fam === "small") {
+    leave = new Date((n.t - walk) * 1000);
+    const go = leave.getTime() - Date.now() < 45000;
+    line(w, CFG.walk ? (go ? "LEAVE NOW" : "LEAVE IN") : "NEXT TRAIN IN", 10, go ? GREEN : AMBER, true);
+    timer(w, leave, 36, false);
     w.addSpacer(2);
-    line(w, "No trains due", 22, DIM, true);
-    line(w, "in the next 90 minutes", 12, DIM, false);
-    w.refreshAfterDate = new Date(Date.now() + 5 * 60000);
-  } else {
-    const n = ok[0];
-    const leave = new Date((n.t - walk) * 1000);
-    line(w, CFG.walk ? "LEAVE IN" : "NEXT TRAIN IN", 11, AMBER, true);
-    if (leave.getTime() - Date.now() < 45000) {
-      line(w, CFG.walk ? "GO NOW" : "NOW", big ? 34 : 30, GREEN, true);
-    } else {
-      const d = w.addDate(leave);
-      d.applyTimerStyle();
-      d.font = Font.boldMonospacedSystemFont(big ? 34 : 30);
-      d.textColor = AMBER; d.lineLimit = 1; d.minimumScaleFactor = .6;
-    }
-    const row = w.addStack(); row.centerAlignContent(); row.spacing = 5;
-    bullet(row, n.route, big ? 18 : 16);
-    line(row, "at " + clock(new Date(n.t * 1000)) + " to " + n.dest, big ? 12 : 11, WHITE, false);
-    if (big) {
-      for (const a of ok.slice(1, 3)) {
-        w.addSpacer(3);
-        const r = w.addStack(); r.centerAlignContent(); r.spacing = 5;
-        bullet(r, a.route, 15);
-        line(r, "to " + a.dest + " · leave " + clock(new Date((a.t - walk) * 1000)), 11, DIM, false);
-      }
-    }
-    w.refreshAfterDate = new Date(Math.min(leave.getTime() + 20000, Date.now() + 5 * 60000));
+    const r = w.addStack(); r.centerAlignContent(); r.spacing = 5;
+    bullet(r, n.route, 17);
+    line(r, clock(new Date(n.t * 1000)), 14, WHITE, true);
+    line(w, "to " + n.dest, 11, DIM, false);
+    w.addSpacer();
+    const f = w.addStack();
+    if (ok[1]) { line(f, "then " + clock(new Date(ok[1].t * 1000), true), 10, DIM, false); f.addSpacer(); }
+    line(f, "↻ " + clock(new Date(), true), 9, DIM, false);
+  } else if (fam === "medium") {
+    const body = w.addStack(); body.spacing = 12;
+    leave = heroBox(body, n, walk, { width: 150, timer: 38, pad: 7 });
+    const col = body.addStack(); col.layoutVertically(); col.spacing = 7;
+    line(col, ok.length > 1 ? "THEN" : "NO MORE TRAINS SOON", 10, DIM, true);
+    for (const a of ok.slice(1, 4)) trainRow(col, a, walk, false);
+    col.addSpacer();
+    line(col, updated, 9, DIM, false);
+  } else { // large and extra large
+    leave = heroBox(w, n, walk, { timer: 54, pad: 10, wide: true });
+    w.addSpacer(10);
+    const col = w.addStack(); col.layoutVertically(); col.spacing = 9;
+    if (ok.length > 1) line(col, "THEN", 10, DIM, true);
+    for (const a of ok.slice(1, 7)) trainRow(col, a, walk, true);
+    w.addSpacer();
+    line(w, updated, 9, DIM, false);
   }
-  w.addSpacer();
-  line(w, "Updated " + clock(new Date()), 9, DIM, false);
+  w.refreshAfterDate = new Date(Math.min(leave.getTime() + 20000, Date.now() + 5 * 60000));
   return w;
 }
 
@@ -769,7 +819,7 @@ function widgetScript() {
   const names = {};
   for (const id in byStop) names[id] = byStop[id].name;
   const cfg = {
-    station: c.name, dir: dirSummary().map(d => d.label.replace(/^[↑↓] /, "")).join(" · "),
+    station: c.name, dir: [...new Set(dirSummary().map(d => d.label.replace(/^[↑↓] /, "")))].join(" · "),
     stops: settings.stops, walk: settings.walk, feeds: feedsFor(settings.stops), url: appUrl()
   };
   return $("widgetSrc").textContent.trim().replace("__CFG__", () => JSON.stringify(cfg)).replace("__NAMES__", () => JSON.stringify(names)) + "\n";
