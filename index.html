@@ -262,6 +262,7 @@ details.help b { color: var(--text); }
         </ol>
         <p><button id="copyBtn" class="pill" type="button">Copy widget</button><span id="copied" class="copied"></span></p>
         <p>Good to know: iPhones only refresh widgets every few minutes, so the train times on it can be a little behind. The small widget shows the clock time to leave by; the medium and large ones show a ticking countdown, which can count up past zero until the iPhone refreshes it. For up-to-the-second times, tap the widget to open this app.</p>
+        <p>The widget's look updates by itself whenever Next Train is improved, so there's no need to copy it again for that.</p>
         <p style="margin-bottom:0">If you change your station, directions or walk time, tap <b>Copy widget</b> again and paste it over the old script in Scriptable.</p>
       </div>
     </details>
@@ -271,248 +272,34 @@ details.help b { color: var(--text); }
 
 <script type="text/plain" id="widgetSrc">
 // Next Train widget for Scriptable. Made by the Next Train web app.
-// To change station, directions or walk time: open the app, tap "Copy widget", and paste over this script.
+// Your settings are below. The widget design downloads fresh from the Next Train site each time,
+// so it updates by itself. To change station, directions or walk time: open the app,
+// tap "Copy widget", and paste over this script.
 const CFG = __CFG__;
-const NAMES = __NAMES__;
-const FEED = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2F";
-const AMBER = new Color("#ffc24a"), CYAN = new Color("#5cc8ff"), GREEN = new Color("#5dff9a"), DIM = new Color("#8798ad"), WHITE = new Color("#e8f1fb");
+const CODE_URL = __CODE_URL__;
 
-function lineColor(r) {
-  const c = { "1": "#D82233", "2": "#D82233", "3": "#D82233", "4": "#009952", "5": "#009952", "6": "#009952", "7": "#9A38A1",
-    A: "#0062CF", C: "#0062CF", E: "#0062CF", B: "#EB6800", D: "#EB6800", F: "#EB6800", M: "#EB6800", G: "#799534",
-    J: "#8E5C33", Z: "#8E5C33", L: "#7C858C", N: "#F6BC26", Q: "#F6BC26", R: "#F6BC26", W: "#F6BC26", SI: "#08179C",
-    GS: "#7C858C", FS: "#7C858C", H: "#7C858C", S: "#7C858C" };
-  return c[r] || c[r.replace(/X$/, "")] || "#7C858C";
-}
-function lineText(r) {
-  if (r === "GS" || r === "FS" || r === "H" || r === "S") return "S";
-  if (r === "SI" || r === "SS") return "SIR";
-  return r.replace(/X$/, "");
-}
-
-// Tiny GTFS-realtime reader: only the fields we need.
-function parseFeed(b, wanted, out) {
-  let p = 0;
-  function varint() { let r = 0, m = 1, c; do { c = b[p++] & 255; r += (c & 127) * m; m *= 128; } while (c & 128); return r; }
-  function str(s, e) { let t = ""; for (let i = s; i < e; i++) t += String.fromCharCode(b[i] & 255); return t; }
-  function skip(w) { if (w === 0) varint(); else if (w === 1) p += 8; else if (w === 2) { const l = varint(); p += l; } else if (w === 5) p += 4; else throw new Error("bad feed"); }
-  function msg(end, fn, onInt) {
-    while (p < end) {
-      const k = varint(), f = Math.floor(k / 8), w = k & 7;
-      if (w === 2) { const l = varint(), e = p + l; fn(f, e); p = e; }
-      else if (w === 0 && onInt) onInt(f, varint());
-      else skip(w);
-    }
-  }
-  function evTime(end) { let t = 0; msg(end, () => {}, (f, v) => { if (f === 2) t = v; }); return t; }
-  msg(b.length, (f, e) => {
-    if (f !== 2) return;
-    msg(e, (f, e) => {
-      if (f !== 3) return;
-      let route = "", stus = [];
-      msg(e, (f, e) => {
-        if (f === 1) msg(e, (f, e) => { if (f === 5) route = str(p, e); });
-        else if (f === 2) {
-          const s = { id: "", a: 0, d: 0 };
-          msg(e, (f, e) => { if (f === 4) s.id = str(p, e); else if (f === 2) s.a = evTime(e); else if (f === 3) s.d = evTime(e); });
-          stus.push(s);
-        }
-      });
-      if (!stus.length) return;
-      const last = stus[stus.length - 1].id;
-      for (const s of stus) {
-        if (!wanted[s.id] || s.id === last) continue;
-        const t = s.a || s.d;
-        if (t) out.push({ route, stop: s.id, t, dest: NAMES[last.slice(0, 3)] || last });
-      }
-    });
-  });
-}
-
-async function getTrains() {
-  const wanted = {}; CFG.stops.forEach(s => wanted[s] = 1);
-  const all = []; let ok = 0;
-  for (const f of CFG.feeds) {
-    try {
-      const r = new Request(FEED + f);
-      r.timeoutInterval = 20;
-      const d = await r.load();
-      const got = [];
-      parseFeed(d.getBytes(), wanted, got);
-      all.push(...got); ok++;
-    } catch (e) { }
-  }
-  if (!ok) throw new Error("offline");
-  const now = Date.now() / 1000;
-  all.sort((a, b) => a.t - b.t);
-  const keep = [];
-  for (const a of all) {
-    if (a.t < now - 30 || a.t > now + 5400) continue;
-    if (keep.some(k => k.route === a.route && k.stop === a.stop && Math.abs(k.t - a.t) < 20)) continue;
-    keep.push(a);
-  }
-  return keep;
-}
-
-function clock(d, short) {
-  let h = d.getHours(), m = d.getMinutes(), ap = h < 12 ? "AM" : "PM";
-  h = h % 12 || 12;
-  return h + ":" + (m < 10 ? "0" : "") + m + (short ? "" : " " + ap);
-}
-
-function bullet(parent, route, size) {
-  const txt = lineText(route);
-  const s = parent.addStack();
-  s.size = new Size(txt.length > 1 ? size * 1.6 : size, size);
-  s.cornerRadius = size / 2;
-  s.backgroundColor = new Color(lineColor(route));
-  s.centerAlignContent();
-  s.addSpacer();
-  const t = s.addText(txt);
-  t.font = Font.boldSystemFont(size * (txt.length > 1 ? .45 : .62));
-  t.textColor = /^[NQRW]/.test(route) ? Color.black() : Color.white();
-  s.addSpacer();
-  return s;
-}
-
-function line(w, text, size, color, bold) {
-  const t = w.addText(text);
-  t.font = bold ? Font.boldSystemFont(size) : Font.systemFont(size);
-  t.textColor = color; t.lineLimit = 1; t.minimumScaleFactor = .6;
-  return t;
-}
-
-// The big countdown: a live ticking timer to the leave time (or GO NOW when it's time).
-function timer(parent, leave, size, center) {
-  if (leave.getTime() - Date.now() < 45000) {
-    const t = line(parent, CFG.walk ? "GO!" : "NOW", size, GREEN, true);
-    if (center) t.centerAlignText();
-    return;
-  }
-  const d = parent.addDate(leave);
-  d.applyTimerStyle();
-  d.font = Font.boldMonospacedSystemFont(size);
-  d.textColor = AMBER; d.lineLimit = 1; d.minimumScaleFactor = .5;
-  if (center) d.centerAlignText();
-}
-
-// Glowing outlined box like the app's LEAVE IN panel.
-function heroBox(parent, n, walk, opts) {
-  const leave = new Date((n.t - walk) * 1000);
-  const go = leave.getTime() - Date.now() < 45000;
-  const box = parent.addStack();
-  box.layoutVertically();
-  box.borderColor = go ? GREEN : AMBER; box.borderWidth = 1.5; box.cornerRadius = 14;
-  box.backgroundColor = new Color(go ? "#5dff9a" : "#ffc24a", .09);
-  box.setPadding(opts.pad, 10, opts.pad, 10);
-  if (opts.width) box.size = new Size(opts.width, 0);
-  const k = box.addStack(); k.addSpacer();
-  line(k, CFG.walk ? (go ? "LEAVE NOW" : "LEAVE IN") : "NEXT TRAIN IN", 10, go ? GREEN : AMBER, true);
-  k.addSpacer();
-  const tr = box.addStack(); tr.addSpacer(); timer(tr, leave, opts.timer, true); tr.addSpacer();
-  const r = box.addStack(); r.centerAlignContent(); r.spacing = 4; r.addSpacer();
-  bullet(r, n.route, 16);
-  line(r, opts.wide ? "at " + clock(new Date(n.t * 1000)) + " to " + n.dest : clock(new Date(n.t * 1000)), 13, WHITE, true);
-  r.addSpacer();
-  if (!opts.wide) { const dr = box.addStack(); dr.addSpacer(); line(dr, "to " + n.dest, 11, DIM, false); dr.addSpacer(); }
-  return leave;
-}
-
-// One upcoming train: bullet, arrival time, and when to leave for it.
-function trainRow(parent, a, walk, withDest) {
-  const r = parent.addStack(); r.centerAlignContent(); r.spacing = 6;
-  bullet(r, a.route, 16);
-  if (withDest) { line(r, a.dest, 12, WHITE, false); r.addSpacer(); line(r, clock(new Date(a.t * 1000), true), 12, WHITE, true); }
-  else { line(r, clock(new Date(a.t * 1000), true), 13, WHITE, true); r.addSpacer(); }
-  line(r, (CFG.walk ? "leave " : "") + clock(new Date((a.t - walk) * 1000), true), 11, CFG.walk ? GREEN : DIM, false);
-}
-
-function message(w, title, sub) {
-  w.addSpacer();
-  line(w, title, 14, WHITE, true);
-  line(w, sub, 12, DIM, false);
-  w.addSpacer();
-}
-
-async function build() {
-  const fam = config.widgetFamily || "medium";
+const fm = FileManager.local();
+const saved = fm.joinPath(fm.cacheDirectory(), "next-train-widget-code.js");
+let code = null;
+try {
+  const r = new Request(CODE_URL + "?t=" + Date.now());
+  r.timeoutInterval = 15;
+  const fresh = await r.loadString();
+  if (fresh.indexOf("NEXT_TRAIN_WIDGET") >= 0) { code = fresh; fm.writeString(saved, fresh); }
+} catch (e) { }
+if (!code && fm.fileExists(saved)) code = fm.readString(saved);
+if (code) {
+  await (new Function("CFG", "return (async () => {\n" + code + "\n})()"))(CFG);
+} else {
   const w = new ListWidget();
   w.backgroundColor = new Color("#05080e");
-  const g = new LinearGradient();
-  g.colors = [new Color("#0d2240"), new Color("#05080e")];
-  g.locations = [0, .7];
-  w.backgroundGradient = g;
-  w.setPadding(fam === "small" ? 11 : 12, 13, fam === "small" ? 10 : 11, 13);
   w.url = CFG.url;
+  const t = w.addText("Next Train can't load right now. Tap to open the app.");
+  t.textColor = Color.white(); t.font = Font.systemFont(13);
   w.refreshAfterDate = new Date(Date.now() + 5 * 60000);
-
-  // header: station + direction
-  const top = w.addStack(); top.centerAlignContent();
-  line(top, CFG.station, fam === "small" ? 11 : 13, CYAN, true);
-  if (fam !== "small") { top.addSpacer(8); line(top, CFG.dir, 11, DIM, false); }
-  w.addSpacer(fam === "small" ? 5 : 7);
-
-  let trains;
-  try { trains = await getTrains(); }
-  catch (e) { message(w, "Can't reach the MTA right now.", "Tap to open Next Train."); return w; }
-  const walk = CFG.walk * 60;
-  const now = Date.now() / 1000;
-  const ok = trains.filter(a => a.t - walk - now > -15);
-  const updated = "Updated " + clock(new Date());
-  if (!ok.length) { message(w, "No trains due", "in the next 90 minutes"); line(w, updated, 9, DIM, false); return w; }
-  const n = ok[0];
-  let leave;
-
-  if (fam === "small") {
-    // Fixed clock times rather than a ticking timer: iOS refreshes widgets when it likes,
-    // and a timer that passes zero starts counting up. A "leave by" time is never wrong.
-    leave = new Date((n.t - walk) * 1000);
-    const soon = leave.getTime() - Date.now() < 60000;
-    const k = w.addStack(); k.centerAlignContent();
-    line(k, CFG.walk ? "LEAVE BY" : "NEXT TRAIN", 10, soon ? GREEN : AMBER, true);
-    k.addSpacer();
-    line(k, "↻ " + clock(new Date(), true), 9, DIM, false);
-    const big = w.addStack(); big.bottomAlignContent(); big.spacing = 3;
-    line(big, clock(CFG.walk ? leave : new Date(n.t * 1000), true), 34, soon ? GREEN : AMBER, true);
-    const ap = big.addStack(); ap.layoutVertically(); ap.addSpacer();
-    line(ap, clock(leave).slice(-2), 11, soon ? GREEN : AMBER, true);
-    ap.addSpacer(5);
-    w.addSpacer(3);
-    const list = w.addStack(); list.layoutVertically(); list.spacing = 4;
-    ok.slice(0, 3).forEach((a, i) => {
-      const r = list.addStack(); r.centerAlignContent(); r.spacing = 5;
-      bullet(r, a.route, 15);
-      line(r, clock(new Date(a.t * 1000), true), 13, i ? WHITE : (soon ? GREEN : AMBER), true);
-      r.addSpacer();
-      if (i && CFG.walk) line(r, "leave " + clock(new Date((a.t - walk) * 1000), true), 10, GREEN, false);
-      else if (!i) line(r, a.dest.replace(/-.*/, ""), 10, DIM, false);
-    });
-    w.addSpacer();
-  } else if (fam === "medium") {
-    const body = w.addStack(); body.spacing = 12;
-    leave = heroBox(body, n, walk, { width: 150, timer: 38, pad: 7 });
-    const col = body.addStack(); col.layoutVertically(); col.spacing = 7;
-    line(col, ok.length > 1 ? "THEN" : "NO MORE TRAINS SOON", 10, DIM, true);
-    for (const a of ok.slice(1, 4)) trainRow(col, a, walk, false);
-    col.addSpacer();
-    line(col, updated, 9, DIM, false);
-  } else { // large and extra large
-    leave = heroBox(w, n, walk, { timer: 54, pad: 10, wide: true });
-    w.addSpacer(10);
-    const col = w.addStack(); col.layoutVertically(); col.spacing = 9;
-    if (ok.length > 1) line(col, "THEN", 10, DIM, true);
-    for (const a of ok.slice(1, 7)) trainRow(col, a, walk, true);
-    w.addSpacer();
-    line(w, updated, 9, DIM, false);
-  }
-  w.refreshAfterDate = new Date(Math.min(leave.getTime() + 20000, Date.now() + 5 * 60000));
-  return w;
+  if (config.runsInWidget) Script.setWidget(w); else await w.presentSmall();
+  Script.complete();
 }
-
-const widget = await build();
-if (config.runsInWidget) Script.setWidget(widget);
-else await widget.presentMedium();
-Script.complete();
 </script>
 
 <script>
@@ -577,8 +364,9 @@ function loadSettings() {
   }
 }
 function clampWalk(w) { w = Math.round(+w); return isFinite(w) ? Math.max(0, Math.min(60, w)) : 5; }
+const SITE = "https://gmd298.github.io/next-train/";
 function appUrl() {
-  return location.origin + location.pathname + "?stops=" + settings.stops.join(",") + "&walk=" + settings.walk;
+  return SITE + "?stops=" + settings.stops.join(",") + "&walk=" + settings.walk;
 }
 function saveSettings() {
   try { localStorage.setItem("nextTrain", JSON.stringify(settings)); } catch (e) { }
@@ -827,13 +615,11 @@ window.addEventListener("focus", () => { if (!$("live").classList.contains("hide
 // ---------- widget script ----------
 function widgetScript() {
   const p = byStop[settings.stops[0].slice(0, 3)], c = complexes.get(p.cx);
-  const names = {};
-  for (const id in byStop) names[id] = byStop[id].name;
   const cfg = {
     station: c.name, dir: [...new Set(dirSummary().map(d => d.label.replace(/^[↑↓] /, "")))].join(" · "),
     stops: settings.stops, walk: settings.walk, feeds: feedsFor(settings.stops), url: appUrl()
   };
-  return $("widgetSrc").textContent.trim().replace("__CFG__", () => JSON.stringify(cfg)).replace("__NAMES__", () => JSON.stringify(names)) + "\n";
+  return $("widgetSrc").textContent.trim().replace("__CFG__", () => JSON.stringify(cfg)).replace("__CODE_URL__", () => JSON.stringify(SITE + "widget.js")) + "\n";
 }
 $("copyBtn").addEventListener("click", async () => {
   const text = widgetScript();
@@ -850,9 +636,25 @@ $("copyBtn").addEventListener("click", async () => {
   setTimeout(() => $("copied").textContent = "", 5000);
 });
 
+// ---------- stay up to date: if the site has a newer version than this saved copy, load it ----------
+const BUILD = "202610040200";
+async function checkForUpdate() {
+  try {
+    const r = await fetch(location.pathname + "?check=" + Date.now(), { cache: "no-store" });
+    const m = (await r.text()).match(/const BUILD = "([^"]+)"/);
+    if (!m || m[1] === BUILD) return;
+    let tried = null; try { tried = sessionStorage.getItem("nextTrainTried"); } catch (e) { }
+    if (tried === m[1]) return;
+    try { sessionStorage.setItem("nextTrainTried", m[1]); } catch (e) { }
+    location.replace(location.pathname + "?" + (settings.stops.length ? "stops=" + settings.stops.join(",") + "&walk=" + settings.walk + "&" : "") + "v=" + m[1]);
+  } catch (e) { }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+
 // ---------- start ----------
 loadSettings();
 if (settings.stops.length) { saveSettings(); showLive(); } else showSetup();
+checkForUpdate();
 </script>
 </body>
 </html>
