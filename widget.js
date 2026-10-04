@@ -200,17 +200,15 @@ async function build() {
     const soon = leave.getTime() - Date.now() < 60000;
     const col = soon ? GREEN : AMBER;
     const k = w.addStack(); k.centerAlignContent();
-    line(k, CFG.walk ? "LEAVE BY" : "NEXT TRAIN", 10, col, true);
+    line(k, CFG.walk ? "LEAVE IN" : "TRAIN IN", 11, col, true);
     k.addSpacer();
     line(k, "↻ " + clock(new Date(), true), 9, DIM, false);
-    const big = w.addStack(); big.bottomAlignContent(); big.spacing = 3;
-    line(big, clock(target, true), 30, col, true);
-    const ap = big.addStack(); ap.setPadding(0, 0, 5, 0);
-    line(ap, clock(target).slice(-2), 10, col, true);
-    const off = w.addDate(target);
-    off.applyOffsetStyle();
-    off.font = Font.boldSystemFont(13); off.textColor = col; off.lineLimit = 1; off.minimumScaleFactor = .7;
-    w.addSpacer(4);
+    // Live ticking countdown with units, e.g. "5 min, 12 sec" (iOS relative style).
+    const cd = w.addDate(target);
+    cd.applyRelativeStyle();
+    cd.font = Font.boldSystemFont(21); cd.textColor = col; cd.lineLimit = 1; cd.minimumScaleFactor = .55;
+    line(w, (CFG.walk ? "by " : "at ") + clock(target), 12, col, false);
+    w.addSpacer(5);
     const list = w.addStack(); list.layoutVertically(); list.spacing = 3;
     ok.slice(0, 3).forEach((a, i) => {
       const r = list.addStack(); r.centerAlignContent(); r.spacing = 5;
